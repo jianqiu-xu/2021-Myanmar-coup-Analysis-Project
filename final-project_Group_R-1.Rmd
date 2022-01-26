@@ -1,0 +1,883 @@
+---
+title: "Programming R for Analytics: Final project"
+author: "Group R: rsule, machury, jianqiux"
+date: "December 9, 2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, align="right", out.width="90%"}
+knitr::include_graphics("https://media.npr.org/assets/img/2021/02/07/ap_21038354715312-e819d1a5d7b13fa6529e6d113fd6fcd83d31c0d8-s1600-c85.webp")
+```
+
+*Source: AP NPR*
+
+```{r message=F, warning=F}
+library(tidyverse)
+library(knitr)
+library(modelsummary)
+library(lubridate)
+library(ggplot2)
+```
+
+```{r message=F, warning=F}
+# Data importation and cleaning
+
+# Import starting data (AAPP)
+detainees <- read_csv("https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/detained.csv.gz")
+imprisoned <- read_csv("https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/imprisoned.csv.gz")
+fallen <- read_csv("https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/fallen.csv")
+
+# Indicators data
+# conflicts (ACLED)
+conflicts <- read_csv("https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/conflicts.csv.gz")
+
+# sectors (MIMU)
+tmp <- tempfile(fileext = ".xlsm")
+httr::GET(
+  url = "https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/MIMU_BaselineData_AllSectors_Countrywide_18Mar2021_revised.xlsm", httr::write_disk(tmp))
+sector.indicators = 
+  readxl::read_xlsx(tmp, sheet=3, skip = 5) %>% as_tibble()
+
+### Organize all sectors data to be given by nested tibbles per indicator
+sector.nest <- sector.indicators %>% 
+  select(1:3, 
+         Indicator_Name, Indicator_Type, Sector, Unit, 
+         starts_with("20"), Source_Name) %>%
+  mutate(Indicator = paste(Indicator_Name, Indicator_Type, 
+                           Sector, Unit, Source_Name, sep="|")) %>%
+  select(1:3, Indicator, starts_with("20")) %>%
+  pivot_longer(cols = starts_with("20"), 
+               names_to = "Year", 
+               values_to ="Value") %>%
+  filter(!is.na(Value)) %>%
+  nest(data = -Indicator) %>%
+  separate(Indicator, sep="\\|", 
+           into = c("Indicator_Name", "Indicator_Type",
+                    "Sector","Unit","Source_Name")) 
+
+detainees <- detainees %>% #extract townships from address column and clean the township names
+  mutate(Township = str_replace_all(Address,".*,","")) %>%
+  mutate(Township = str_replace_all(Township,"T?own.*","")) %>%
+  mutate(Township = str_replace_all(Township,".\r?,.*","")) %>%
+  mutate(Township = str_replace_all(Township,"(\r.*?)","")) %>%
+  mutate(Age = as.numeric(detainees$Age), #assign Age to a numerical variable
+         Gender = factor(Sex, levels = c("F", "M")), #assign gender to a categorical variable
+         Event = "Detained") %>% #assign all observations a "detained" status
+  mutate(Condition = 
+           case_when(str_detect(`Current Condition`, "Detained") ~ "Detained",
+                     str_detect(`Current Condition`, "House Arrest") ~ "House Arrest",
+                     str_detect(`Current Condition`, "Arrested") ~ "Arrested")) %>%
+  mutate(Condition = factor(Condition, levels = c("Detained", "House Arrest", "Arrested"))) %>% #categorize condition of all detainees
+  mutate(Occupation =  case_when(str_detect(`Status`, "Student") ~ "Student", #extract & categorize observations into occupations
+                                 str_detect(`Status`, "Media") ~ "Reporter",
+                                 str_detect(`Status`, "Government") ~ "Government",
+                                 str_detect(`Status`, "Minister") ~ "Government",
+                                 str_detect(`Status`, "MP") ~ "Government",
+                                 str_detect(`Status`, "Ministry") ~ "Government",
+                                 str_detect(`Status`, "NLD") ~ "Government",
+                                 str_detect(`Status`, "CSO") ~ "Government",
+                                 str_detect(`Status`, "UEC") ~ "Government",
+                                 str_detect(`Status`, "Secretary") ~ "Government",
+                                 str_detect(`Status`, "Public Servant") ~ "Government",
+                                 str_detect(`Status`, "Teacher") ~ "Educator",
+                                 str_detect(`Status`, "Education") ~ "Educator",
+                                 str_detect(`Status`, "University") ~ "Educator",
+                                 str_detect(`Status`, "Professor") ~ "Educator",
+                                 str_detect(`Status`, "Civilian") ~ "Civilian",
+                                 str_detect(`Status`, "Worker") ~ "Civilian",
+                                 str_detect(`Status`, "Artist") ~ "Artist",
+                                 str_detect(`Status`, "Doctor") ~ "Medic",
+                                 str_detect(`Status`, "Nurse") ~ "Medic",
+                                 str_detect(`Status`, "Business") ~ "Business person",
+                                 str_detect(`Status`, "Company") ~ "Business person",
+                                 str_detect(`Status`, "Religious") ~ "Religious worker",
+                                 str_detect(`Status`, "Engineer") ~ "Engineer",
+                                 str_detect(`Status`, "Journalism") ~ "Reporter",
+                                 TRUE ~ "Other"),
+         Month = case_when(str_detect(`Date of Arrest`, "Jan") ~ "Jan", #extract month value from dates
+                           str_detect(`Date of Arrest`, "Feb") ~ "Feb",
+                           str_detect(`Date of Arrest`, "Mar") ~ "Mar",
+                           str_detect(`Date of Arrest`, "Apr") ~ "Apr",
+                           str_detect(`Date of Arrest`, "May") ~ "May",
+                           str_detect(`Date of Arrest`, "Jun") ~ "Jun",
+                           str_detect(`Date of Arrest`, "Jul") ~ "Jul",
+                           str_detect(`Date of Arrest`, "Aug") ~ "Aug",
+                           str_detect(`Date of Arrest`, "Sep") ~ "Sep",
+                           str_detect(`Date of Arrest`, "Oct") ~ "Oct",
+                           str_detect(`Date of Arrest`, "Nov") ~ "Nov",
+                           str_detect(`Date of Arrest`, "Dec") ~ "Dec")) %>%
+  mutate(Month = factor(Month, levels = c("Jan", 
+                                          "Feb",
+                                          "Mar",
+                                          "Apr",
+                                          "May",
+                                          "Jun",
+                                          "Jul",
+                                          "Aug",
+                                          "Sep",
+                                          "Oct",
+                                          "Nov",
+                                          "Dec"))) %>%
+  mutate(Occupation = factor(Occupation, levels = c("Government",
+                                                    "Civilian",
+                                                    "Student",
+                                                    "Activist",
+                                                    "Volunteer",
+                                                    "Reporter",
+                                                    "Educator",
+                                                    "Artist",
+                                                    "Medic",
+                                                    "Security Forces",
+                                                    "Religious worker",
+                                                    "Business person",
+                                                    "Engineer",
+                                                    "Farmer")))
+
+imprisoned <- imprisoned %>% #extract townships from address column and clean the township names
+  mutate(Township = str_replace_all(Address,".*,","")) %>%
+  mutate(Township = str_replace_all(Township,"T?own.*","")) %>%
+  mutate(Township = str_replace_all(Township,".\r?,.*","")) %>%
+  mutate(Township = str_replace_all(Township,"(\r.*?)","")) %>%
+  mutate(Age = as.numeric(imprisoned$Age), #clean age
+         Gender = factor(`Sex /Age`, levels = c("F", "M")),
+         Event = "Imprisoned") %>%
+  mutate(Occupation =  case_when(str_detect(`Status`, "Student") ~ "Student", #extract & categorize observations into occupations
+                                 str_detect(`Status`, "Media") ~ "Reporter",
+                                 str_detect(`Status`, "Government") ~ "Government",
+                                 str_detect(`Status`, "Minister") ~ "Government",
+                                 str_detect(`Status`, "MP") ~ "Government",
+                                 str_detect(`Status`, "Ministry") ~ "Government",
+                                 str_detect(`Status`, "NLD") ~ "Government",
+                                 str_detect(`Status`, "CSO") ~ "Government",
+                                 str_detect(`Status`, "UEC") ~ "Government",
+                                 str_detect(`Status`, "Secretary") ~ "Government",
+                                 str_detect(`Status`, "Public Servant") ~ "Government",
+                                 str_detect(`Status`, "Teacher") ~ "Educator",
+                                 str_detect(`Status`, "Education") ~ "Educator",
+                                 str_detect(`Status`, "University") ~ "Educator",
+                                 str_detect(`Status`, "Professor") ~ "Educator",
+                                 str_detect(`Status`, "Civilian") ~ "Civilian",
+                                 str_detect(`Status`, "Worker") ~ "Civilian",
+                                 str_detect(`Status`, "Artist") ~ "Artist",
+                                 str_detect(`Status`, "Doctor") ~ "Medic",
+                                 str_detect(`Status`, "Nurse") ~ "Medic",
+                                 str_detect(`Status`, "Business") ~ "Business person",
+                                 str_detect(`Status`, "Company") ~ "Business person",
+                                 str_detect(`Status`, "Religious") ~ "Religious worker",
+                                 str_detect(`Status`, "Engineer") ~ "Engineer",
+                                 str_detect(`Status`, "Journalism") ~ "Reporter",
+                                 TRUE ~ "Other"),
+         Month = case_when(str_detect(`Date of Arrest`, "Jan") ~ "Jan", #extract month value from date
+                           str_detect(`Date of Arrest`, "Feb") ~ "Feb",
+                           str_detect(`Date of Arrest`, "Mar") ~ "Mar",
+                           str_detect(`Date of Arrest`, "Apr") ~ "Apr",
+                           str_detect(`Date of Arrest`, "May") ~ "May",
+                           str_detect(`Date of Arrest`, "Jun") ~ "Jun",
+                           str_detect(`Date of Arrest`, "Jul") ~ "Jul",
+                           str_detect(`Date of Arrest`, "Aug") ~ "Aug",
+                           str_detect(`Date of Arrest`, "Sep") ~ "Sep",
+                           str_detect(`Date of Arrest`, "Oct") ~ "Oct",
+                           str_detect(`Date of Arrest`, "Nov") ~ "Nov",
+                           str_detect(`Date of Arrest`, "Dec") ~ "Dec")) %>%
+  mutate(Month = factor(Month, levels = c("Jan",
+                                          "Feb",
+                                          "Mar",
+                                          "Apr",
+                                          "May",
+                                          "Jun",
+                                          "Jul",
+                                          "Aug",
+                                          "Sep",
+                                          "Oct",
+                                          "Nov",
+                                          "Dec"))) %>%
+  mutate(Occupation = factor(Occupation, levels = c("Government", 
+                                                    "Civilian",
+                                                    "Student",
+                                                    "Activist",
+                                                    "Volunteer",
+                                                    "Reporter",
+                                                    "Educator",
+                                                    "Artist",
+                                                    "Medic",
+                                                    "Security Forces",
+                                                    "Religious worker",
+                                                    "Business person",
+                                                    "Engineer",
+                                                    "Farmer")))
+
+fallen <- fallen %>% #extract townships from address column and clean the township names
+  mutate(Township = str_replace_all(Township,".*,","")) %>%
+  mutate(Township = str_replace_all(Township,"T?own.*","")) %>%
+  mutate(Township = str_replace_all(Township,".\r?,.*","")) %>%
+  mutate(Township = str_replace_all(Township,"(\r.*?)","")) %>%
+  mutate(Age = as.numeric(fallen$Age),
+         Gender = factor(Sex, levels = c("F", "M")),
+         Event = "Fallen",
+         Month = case_when(str_detect(`Deceased Date`, "Jan") ~ "Jan", #extract month value from date
+                           str_detect(`Deceased Date`, "Feb") ~ "Feb",
+                           str_detect(`Deceased Date`, "Mar") ~ "Mar",
+                           str_detect(`Deceased Date`, "Apr") ~ "Apr",
+                           str_detect(`Deceased Date`, "May") ~ "May",
+                           str_detect(`Deceased Date`, "Jun") ~ "Jun",
+                           str_detect(`Deceased Date`, "Jul") ~ "Jul",
+                           str_detect(`Deceased Date`, "Aug") ~ "Aug",
+                           str_detect(`Deceased Date`, "Sep") ~ "Sep",
+                           str_detect(`Deceased Date`, "Oct") ~ "Oct",
+                           str_detect(`Deceased Date`, "Nov") ~ "Nov",
+                           str_detect(`Deceased Date`, "Dec") ~ "Dec")) %>%
+  mutate(Month = factor(Month, levels = c("Jan",
+                                          "Feb",
+                                          "Mar",
+                                          "Apr",
+                                          "May",
+                                          "Jun",
+                                          "Jul",
+                                          "Aug",
+                                          "Sep",
+                                          "Oct",
+                                          "Nov",
+                                          "Dec"))) %>%
+  mutate(Occupation =  case_when(str_detect(`Organization`, "Student") ~ "Student", #extract & categorize observations into occupations
+                                 str_detect(`Organization`, "Media") ~ "Reporter",
+                                 str_detect(`Organization`, "Minister") ~ "Government",
+                                 str_detect(`Organization`, "MP") ~ "Government",
+                                 str_detect(`Organization`, "Ministry") ~ "Government",
+                                 str_detect(`Organization`, "NLD") ~ "Government",
+                                 str_detect(`Organization`, "CSO") ~ "Government",
+                                 str_detect(`Organization`, "UEC") ~ "Government",
+                                 str_detect(`Organization`, "Chairman") ~ "Government",
+                                 str_detect(`Organization`, "Secretary") ~ "Government",
+                                 str_detect(`Organization`, "Public Servant") ~ "Government",
+                                 str_detect(`Organization`, "Teacher") ~ "Educator",
+                                 str_detect(`Organization`, "Education") ~ "Educator",
+                                 str_detect(`Organization`, "University") ~ "Educator",
+                                 str_detect(`Organization`, "Professor") ~ "Educator",
+                                 str_detect(`Organization`, "Civilian") ~ "Civilian",
+                                 str_detect(`Organization`, "Artist") ~ "Artist",
+                                 str_detect(`Organization`, "Security") ~ "Security Forces",
+                                 str_detect(`Organization`, "Doctor") ~ "Medic",
+                                 str_detect(`Organization`, "Nurse") ~ "Medic",
+                                 str_detect(`Organization`, "Business") ~ "Business person",
+                                 str_detect(`Organization`, "Company") ~ "Business person",
+                                 str_detect(`Organization`, "Religious") ~ "Religious worker",
+                                 str_detect(`Organization`, "Engineer") ~ "Engineer",
+                                 str_detect(`Organization`, "Journalism") ~ "Reporter",
+                                 str_detect(`Organization`, "Farmer") ~ "Farmer",
+                                 str_detect(`Organization`, "Volunteer") ~ "Volunteer",
+                                 str_detect(`Organization`, "Activist") ~ "Activist",
+                                 TRUE ~ "Other")) %>%
+  mutate(Occupation = factor(Occupation, levels = c("Government",
+                                                    "Civilian",
+                                                    "Student",
+                                                    "Activist",
+                                                    "Volunteer",
+                                                    "Reporter",
+                                                    "Educator",
+                                                    "Artist",
+                                                    "Medic",
+                                                    "Security Forces",
+                                                    "Religious worker",
+                                                    "Business person",
+                                                    "Engineer",
+                                                    "Farmer")))
+
+coup.victims <- bind_rows(detainees, fallen, imprisoned) #merge detainees, fallen & imprisoned tables
+
+coup.victims <- coup.victims %>%
+  mutate(Event = factor(Event, levels = c("Detained",
+                                          "Imprisoned",
+                                          "Fallen"))) %>%
+  mutate(AgeGroup = case_when(Age >= 40 ~ 'Over 40', #categorize observations into age groups
+                              Age >= 30  & Age < 40 ~ '30-39',
+                              Age >= 18  & Age < 30 ~ '18-29',
+                              Age < 18 ~ 'Under 18')) %>%
+  mutate(AgeGroup = factor(AgeGroup, levels = c("Under 18", "18-29", "30-39", "Over 40")))
+
+detainees.summary <- detainees %>% #summary table for detainees
+  mutate(Name = str_replace_all(Name,".\r?,.*","")) %>%
+  mutate(Name = str_replace_all(Name,"(\r.*?)","")) %>%
+  filter(!is.na(Age) & !is.na(Gender) & !is.na(Occupation) & !is.na(Condition) & !is.na(Month) & !is.na(Township)) %>%
+  rename(`Detainment month` = Month) %>%
+  select(Name, Gender, Age, Occupation, `Detainment month`, Condition, Township)
+
+imprisoned.summary <- imprisoned %>% #summary table for imprisoned
+  mutate(Name = str_replace_all(Name,".\r?,.*","")) %>%
+  mutate(Name = str_replace_all(Name,"(\r.*?)","")) %>%
+  filter(!is.na(Age) & !is.na(Gender) & !is.na(Occupation) & !is.na(Month) & !is.na(Township)) %>%
+  rename(`Imprisonment month` = Month) %>%
+  select(Name, Gender, Age, Occupation, `Imprisonment month`, Township)
+
+fallen.summary <- fallen %>% #summary table for fallen
+  mutate(Name = str_replace_all(Name,".\r?,.*","")) %>%
+  mutate(Name = str_replace_all(Name,"(\r.*?)","")) %>%
+  filter(!is.na(Age) & !is.na(Gender) & !is.na(Occupation) & !is.na(Month) & !is.na(Township))  %>%
+  rename(`Death month` = Month) %>%
+  select(Name, Gender, Age, Occupation, `Death month`, Township)
+
+victims.summary <- coup.victims %>% #summary table for all victims
+  mutate(Name = str_replace_all(Name,".\r?,.*","")) %>%
+  mutate(Name = str_replace_all(Name,"(\r.*?)","")) %>%
+  filter(!is.na(Age) & !is.na(Gender) & !is.na(Occupation) & !is.na(Month) & !is.na(Township)) %>%
+  select(Name, Gender, Age, Occupation, Month, Event, Township)
+
+
+#leven function
+leven <- function(x, y, k = 0, ignore.case = T) {
+  data.frame(y = y) %>%
+    as_tibble() %>%
+    # compute Levenshtein distance for string x for each y
+    mutate(distance = utils::adist(x, y, 
+                                   ignore.case=ignore.case) %>% .[1,]) %>%
+    # keep y's within k of the best match
+    filter(distance <= min(distance, na.rm = T) + k) %>%
+    mutate(distance.per.char = distance/nchar(y))
+}
+
+# apply leven function
+apply_leven <- function(x, y, k = 0, distance.threshold = 0.3, ignore.case = F) {
+  data.frame(x = x) %>%
+    # get potential matches for each x as a list of tibbles
+    mutate(leven.df = map(x, ~ leven(.x, 
+                                     y = y,
+                                     k = k, 
+                                     ignore.case=ignore.case))) %>%
+    unnest(everything()) %>%
+    mutate(is.match = distance.per.char < distance.threshold) %>%
+    # order by best match
+    arrange(distance.per.char) %>%
+    # keep the best match per `x`
+    group_by(x) %>% 
+    slice(1) %>%  
+    ungroup() %>%
+    # convert non-matches to Other
+    mutate(y = ifelse(is.match, y, "Other"))  
+}
+
+#table for township sizes
+township.sizes <- sector.nest %>% 
+  filter(Indicator_Name == "Population size", 
+         Indicator_Type == "Total", 
+         str_detect(Source_Name, "Census")) %>%
+  unnest(everything())
+
+#table for nested detainee data excluding Township
+nested.det <- detainees %>% nest(data =- Township)
+
+#table with detainees joined to MIMU townships
+joined.det <- nested.det %>%
+  inner_join(apply_leven(nested.det$Township, 
+                         township.sizes$Township_Name,
+                         distance.threshold = 0.28),
+             by = c("Township" = "x")) %>%
+  rename(detainee_township = Township, MIMU_township = y)
+
+#table showing detainees per MIMU township
+joined.mimu <- joined.det %>%
+  group_by(MIMU_township) %>%
+  summarise(detainees = sum(map_dbl(data,nrow)))
+
+#coup victims table merged with MIMU township table
+joined.victims <- coup.victims %>% 
+  nest(data =- Township) %>%
+  inner_join(apply_leven(.$Township,
+                         township.sizes$Township_Name,
+                         distance.threshold = 0.28),
+             by = c("Township" = "x")) %>%
+  rename(victims_township = Township, MIMU_township = y) %>%
+  #summarize at MIMU_township level
+  group_by(MIMU_township) %>%
+  summarise(pop = sum(map_dbl(data,nrow))) %>%
+  ungroup() %>%
+  # attach MIMU indicator and compute outcome "detainees.per.1000"
+  left_join(township.sizes, by = c("MIMU_township" = "Township_Name")) %>%
+  select(MIMU_township, pop)
+```
+
+
+# Abstract
+The military coup in Myanmar during February of 2021 led to political unrest, mass protests, and clashes among armed groups. Non-governmental organizations, specifically the Assistance Association for Political Prisoners,  Armed Conflict Location and Event Data Project, have maintained records of conflicts, detainment, imprisonments, and deaths since the coup indicating the detainment of over `r nrow(detainees)` people and the death of at least `r nrow(fallen)` people including children. This report presents exploration of the data collected between February and November 2021, statistical analysis to determine drivers of detainment, as well as relationship with socioeconomic indicators. Using a chi-square test of independence, it was discovered that there is a significant relationship between the condition (i.e. detained, imprisoned or dead) and the victim's status (i.e. government worker, civilian or student). The regression analysis conducted suggests that there is a significant relationship between detainment and townships with college level graduates and households with access to the internet. This is evident in the willingness of individuals to speak against oppression and the creation of awareness across the internet. In response, the military has resulted to arbitrary detainment, killing and oppression of innocent citizens (e.g restriction of internet access and the increasing number of fatalities). Overall, the report provides relevant information to policymakers and actors about detainment in Myanmar due to the military coup. 
+
+# Introduction
+### The Myanmar coup of 2021
+On February 1st, 2021, the Burmese military staged a coup, assuming control of the country and removing Aung San Suu Kyi, the civilian leader supported by the National League of Democracy (NLD), and other elected officials from power. Since the coup, many civilians and opposition forces have been detained, imprisoned, and killed. Detention as punishment for the legitimate exercise of fundamental human rights, including freedom of expression and opinion, freedom of peaceful assembly, and freedom of association, is arbitrary and problematic. 
+
+The goal of this report is to characterize the post-coup detainment between February and November 2021. The report analysis presents information on the demographics of victims, their locations and possible drivers of detainment. This will be conducted by exploring the relationship between detainment in Myanmar townships and geographic, social, and economic indicators across townships. Consequently, the hypothesis set up to facilitate significance testing is checking for significant relationship between detainment at the township level and townships with high number of college educated individuals, access to the internet and  high living standards. 
+
+# Data & Methodology 
+The analysis for the study was based on data collected from non-governmental organizations. The Assistance Association for Political Prisoners (AAPP) maintains databases the Myanmar 2021 coup victims. The database of registered detainees has `r nrow(detainees)` observations with demographics data and current conditions. The imprisoned and fallen databases, also provided by the AAPP, have similar data but with significantly fewer observations, `r nrow(imprisoned)` and `r nrow(fallen)`, respectively. The Armed Conflict Location and Event Data Project (ACLED) database contains data on `r nrow(conflicts)` conflict events, which have taken place since the coup in February 2021, and its associated actors. Relevant socioeconomic indicators of Myanmar by region were provided by the Myanmar Information and Management Unit (MIMU).
+
+The steps encompassed in the statistical analysis process were: 
+
+**1. Importing the raw data:**
+     The first state (Raw data) was the data as it was extracted from the databases. The raw data contained wrong data types (e.g. numbers        stored as strings), wrong category labels, unknown or unexpected character encoding, missing values and so on.
+     The following data sets were imported and used for analysis:
+     
+    - `detained.csv.gz`: the gzipped csv file concerning detainees (AAPP)
+    - `imprisoned.csv.gz`: the file concerning those sentenced (AAPP)
+    - `fallen.csv`: the file concerning those deceased civilians from conflict with the military (AAPP)
+    - `MIMU_Baseline... .xlsm`: an Excel macro file containing historical Myanmar indicators at the township level (MIMU)
+    - `conflicts.csv.gz`: a derived data set on conflicts and protests in Myanmar in 2021 (ACLED)
+     
+**2. Type checking and data normalization:**
+     To convert the data to a technically correct state for further analysis, type conversion and data normalization was performed to columns      such as age, gender, occupation, date, township and so on.
+     
+**3. Data summarization:**
+     The consistent data was summarized into tables and descriptive figures for data exploration, which served as the starting point for          statistical analysis. During data exploration it was discovered that the raw data had missing values, incorrectly imputed values which       reduced the overall size of the data available for analysis and therefore posed threats of incorrect results. 
+
+Given that these data sets were obtained through different organizations, the data sets were combined to evaluate to find relationships between them. The first combination was made by binding detainees, imprisoned, and fallen. To ensure a clear relationship between them, a table containing official MIMU townships was inserted. Within this table, an additional column was inserted through mutation to determine the status of a person, specifically detained, imprisoned, or fallen. To find a relationship between conflicts within townships and the number of detainees, imprisoned, and fallen by month, the status column from the [master.coup] table was introduced to the conflict table. Lastly, to find relevant relationships between high numbers of detainees and socioeconomic indicators, we created an additional table with indicators by township, from the MIMU database, specifically literacy rates, number of households with internet access, wealth index, and number of people over the age of 25 with a college degree. The combination of the tables was done by townships as it is the most common variable throughout the data sets, and many demographic variables and dates were either not registered for many of the observations, or they were in a messy string. Although it should be noted that gender, sex, and date columns were formatted. 
+
+With the clean information obtained, the group used summarization functions and tables to search relevant information relating to the demographics of detainees, imprisoned, and fallen victims, as well as their relationships with conflicts and socioeconomic indicators. To determine significant relationships between the variables used, the group used regression analysis and statistical tests. A regression analysis was performed to find the relationship between the number of detainees by township and socioeconomic indicators, specifically wealth index, number of households with access to the internet, and number of people by township older than 25 with a college degree. A Chi-square test was performed to see the relationship between occupation, specifically government, students, and civilians, and the number of detainees, imprisoned and fallen.
+
+
+## Data Insights {.tabset}
+
+### Detainees Summary
+```{r message=F, warning=F}
+#summary of pre-processed detainees table
+detainees.summary %>%
+  head(5) %>%
+  kable(format = "markdown", caption = "Summary of detainees")
+```
+### Imprisoned Summary
+``` {r message=F, warning=F}
+#summary of pre-processed imprisoned table
+imprisoned.summary %>%
+  head(5) %>%
+  kable(format = "markdown", caption = "Summary of imprisoned")
+```
+### Fallen Summary
+```{r message=F, warning=F}
+#summary of pre-processed fallen table
+fallen.summary %>%
+  head(5) %>%
+  kable(format = "markdown", caption = "Summary of fallen")
+```
+### All victims Summary
+```{r message=F, warning=F}
+#summary of pre-processed victims table
+victims.summary %>%
+  head(5) %>%
+  kable(format = "markdown", caption = "Summary of all coup victims")
+```
+
+## {-}
+
+## Detainee data overview
+```{r message=F, warning=F}
+#pie chart of detainment by gender
+detainees %>%
+  filter(!is.na(Gender)) %>%
+  ggplot(aes(x = "", y = Gender, fill = Gender)) + 
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  labs(title = "Detainment by gender", caption = "Figure 1")
+
+```
+
+Of the `r nrow(detainees)` detainees, it was recorded that there were `r detainees %>% filter(Gender == "M") %>% count()` men and `r detainees %>% filter(Gender == "F") %>% count()` women, indicating that there were more detainee observations for men than women as shown in (Figure 1).  
+
+```{r message=F, warning=F}
+#Detainees by Condition
+detainees %>% 
+  group_by(Condition) %>%
+  filter(!is.na(Condition)) %>%
+  summarize(`Number of detainees` = n()) %>%
+  kable(caption = "Detainees by Current Condition")
+
+```
+
+Most detainees, `r detainees %>% filter(Condition == "Detained") %>% count()`,were detained in prisons while at least `r detainees %>% filter(Condition == "House Arrest") %>% count()` were placed under house arrest. The remarks in the database suggest that detainment was in relation to the protests. Although the data indicates that `r detainees %>% filter(Condition == "Arrested") %>% count()` person has been arrested, it is unclear whether all who have been detained have undergone due process.
+
+```{r message=F, warning=F}
+#bar graph of detainment by month
+detainees %>%
+  filter(!is.na(Month)) %>%
+  ggplot(aes(x = Month)) + geom_bar() + labs(y = "Number of detainees", title = "Detainment by Month", caption = "Figure 2")
+```
+
+Since the coup started, detainment was been highest in March 2021 (Figure 2) with at least `r detainees %>% filter(Month == "Mar") %>% count()` people being detained. Since then, the number of recorded observations for detainment has dropped with `r detainees %>% filter(Month == "Oct") %>% count()` and `r detainees %>% filter(Month == "Nov") %>% count()` detainees reported in October and November 2021, respectively.
+
+```{r message=F, warning=F}
+#summary of detainees by occupation
+detainees %>%
+  group_by(Occupation) %>%
+  summarize(`Number of detainees` = n()) %>%
+  arrange(desc(`Number of detainees`)) %>%
+  kable(format = "markdown", caption = "Detainement by occupation")
+
+```
+With a myriad of people across the country rising to protest the military coup, a wide variety of occupations were recorded for the detainees including students, teachers, religious workers, medics, engineers and government workers. From the data, students(`r detainees %>% filter(Occupation == "Student") %>% count()`) and government workers(`r detainees %>% filter(Occupation == "Government") %>% count()`) are the two most common occupations among detainees (besides the general category of civilians).
+
+## {.tabset}
+### Detainment at Township level
+```{r message=F, warning=F}
+#townships with the top 5 detainee counts
+detainees %>% 
+  nest(data =- Township) %>%
+  inner_join(apply_leven(.$Township,
+                         township.sizes$Township_Name,
+                         distance.threshold = 0.28),
+             by = c("Township" = "x")) %>%
+  rename(detainee_township = Township, MIMU_township = y) %>%
+  group_by(MIMU_township) %>%
+  summarise(Detainees = sum(map_dbl(data,nrow))) %>%
+  ungroup() %>%
+  filter(!MIMU_township == "Other") %>%
+  arrange(desc(Detainees)) %>% head(5) %>%
+  rename(Township = MIMU_township) %>%
+  select(Township, Detainees) %>%
+  kable(format = "markdown", caption = "Townships with highest detainment")
+```
+### Detainment per 1000 at Township level
+```{r message=F, warning=F}
+#Detainees.per.1000 at MIMU township level
+detainees %>% 
+  #nesting
+  nest(data =- Township) %>%
+  #merging with the detainee_township, MIMU_township mapper
+  inner_join(apply_leven(.$Township,
+                         township.sizes$Township_Name,
+                         distance.threshold = 0.28),
+             by = c("Township" = "x")) %>%
+  rename(detainee_township=Township, MIMU_township = y) %>%
+  #summarise at MIMU_township level
+  group_by(MIMU_township) %>%
+  summarise(detainees = sum(map_dbl(data,nrow))) %>%
+  ungroup() %>%
+  # attach MIMU indicator and compute outcome "detainees.per.1000"
+  left_join(township.sizes, by = c("MIMU_township" = "Township_Name")) %>%
+  mutate(detainees.per.1000 = detainees/Value) %>%
+  filter(!is.na(detainees.per.1000)) %>% #exclude NA
+  arrange(desc(detainees.per.1000)) %>% 
+  head(5) %>% #show top 5
+  rename(Township = MIMU_township, `Number of detainees` = detainees, `Detainees per 1000` = detainees.per.1000) %>%
+  select(Township, `Number of detainees`, `Detainees per 1000`) %>%
+  kable(caption = "Detainees per 1000 at Township Level")
+```
+# {-}
+
+The top five townships with the largest group of detainees are **Monywa, Myeik, Hpa-An, Thingangyun, and Hakha**. In terms of detainees per 1000 people, the top five townships are Hakha, Latha, Myeik, Seikkan and Thingangyun.
+
+
+## Imprisoned and Fallen Victims {.tabset}
+### Imprisoned by Gender
+``` {r message=F, warning=F}
+# Imprisoned by Gender
+imprisoned %>%
+  group_by(`Sex /Age`) %>%
+  filter(`Sex /Age` == "F" | `Sex /Age` == "M") %>%
+  summarize("Population" = n()) %>%
+  kable(caption = "Imprisoned by Sex", col.names = c("Gender", "Population"))
+```
+### Imprisoned by Gender
+```{r message=F, warning=F}
+# Imprisoned by Age
+imprisoned %>%
+  filter(!is.na(Age)) %>%
+  select(Age) %>%
+  mutate(AgeGroup = case_when(Age >= 40 ~ 'Over 40',
+                              Age >= 30  & Age < 40 ~ '30-39',
+                              Age >= 18  & Age < 30 ~ '18-29',
+                              Age < 18 ~ 'Under 18')) %>%
+  mutate(AgeGroup = factor(AgeGroup, levels = c("Under 18", "18-29", "30-39", "Over 40"))) %>%
+  group_by(AgeGroup) %>%
+  count() %>%
+  kable(caption = "Imprisoned by Age", col.names = c("Age Group", "Population"))
+```
+### Imprisoned by Occupation
+```{r message=F, warning=F}
+# Imprisoned by Occupation
+imprisoned %>%
+  group_by(`Occupation`) %>%
+  filter(!is.na(Occupation)) %>%
+  count() %>%
+  kable(caption = "Imprisoned by Occupation", col.names = c("Occupation", "Population"))
+```
+### Fallen by Gender
+```{r message=F, warning=F}
+# Fallen by Gender
+fallen %>%
+  group_by(`Sex`) %>%
+  filter(`Sex` == "F" | `Sex` == "M") %>%
+  summarize("Population" = n()) %>%
+  kable(caption = "Fallen by Sex", col.names = c("Gender", "Population"))
+```
+### Fallen by Age
+```{r message=F, warning=F}
+# Fallen by Age
+fallen %>%
+  filter(!is.na(Age)) %>%
+  select(Age) %>%
+  mutate(AgeGroup = case_when(Age >= 40 ~ 'Over 40',
+                              Age >= 30  & Age < 40 ~ '30-39',
+                              Age >= 18  & Age < 30 ~ '18-29',
+                              Age < 18 ~ 'Under 18')) %>%
+  mutate(AgeGroup = factor(AgeGroup, levels = c("Under 18", "18-29", "30-39", "Over 40"))) %>%
+  group_by(AgeGroup) %>%
+  count() %>%
+  kable(caption = "Fallen by Age", col.names = c("Age Group", "Population"))
+```
+### Fallen by Occupation
+```{r message=F, warning=F}
+# Fallen by Occupation
+fallen %>%
+  group_by(Occupation) %>%
+  filter(!is.na(Occupation)) %>%
+  count() %>%
+  kable(caption = "Fallen by Occupation", col.names = c("Occupation", "Population"))
+
+```
+# {-}
+
+## Imprisoned and fallen data overview
+For the imprisoned and fallen observations, males consist of over `r round(imprisoned %>% filter(Gender == "M") %>% count()/nrow(imprisoned) * 100, 0)`% and over `r round(fallen %>% filter(Gender == "M") %>% count()/nrow(fallen) * 100, 0)`%, respectively. The victims who have been imprisoned and killed are mostly aged between 18 to 40 with `r imprisoned %>% filter(Age >= 18 & Age <=40) %>% count()` and `r fallen %>% filter(Age >= 18 & Age <=40) %>% count()` counts respectively. The imprisoned and fallen population recorded consists mostly of civilians, government workers, and students.
+Most victims were detained(`r detainees %>% filter(Month == "Mar") %>% count()`), imprisoned(`r imprisoned %>% filter(Month == "Mar") %>% count()`), or killed(`r fallen %>% filter(Month == "Mar") %>% count()`) in March (as seen in Figure 3 below) as the intensity of the interventions by authorities severely increased at the beginning of March. 
+
+
+```{r message=F, warning=F}
+#Detainment, imprisonment and death by month
+coup.victims %>%
+  filter(!is.na(Month)) %>%
+  group_by(Month, Event) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(x = Month, y = count, group = Event, color = Event)) + 
+  geom_line(size = 2, alpha = 0.9) +
+  labs(x = "Month", 
+       y = "Number of victims", 
+       title = "Detainment, Imprisonment & Death by Month", 
+       fill = "Conflict type", 
+       caption = "Figure 3")
+```
+
+## Conflict types by Month
+According to the record of conflicts, mass protests and riots have occurred across Myanmar since the military seized control on February 1st 2021. Between February and April, there was a significant rise in the number of protests and riots cases, along with violence against civilians from the military forces as seen in (Figure 4) below. During this time, a majority of civilians, students, and government workers were detained, imprisoned, or killed according to our previous analysis. The conflicts escalated starting from May during which the protests and riots have escalated into battles and explosions/remote violence and the number reached its peak of `r conflicts %>%mutate(Month = case_when(str_detect(event_date, "Jan") ~ "Jan",str_detect(event_date, "Feb") ~ "Feb",str_detect(event_date, "Mar") ~ "Mar",str_detect(event_date, "Apr") ~ "Apr",str_detect(event_date, "May") ~ "May",str_detect(event_date, "Jun") ~ "Jun",str_detect(event_date, "Jul") ~ "Jul",str_detect(event_date, "Aug") ~ "Aug",str_detect(event_date, "Sep") ~ "Sep",str_detect(event_date, "Oct") ~ "Oct",str_detect(event_date, "Nov") ~ "Nov",str_detect(event_date, "Dec") ~ "Dec")) %>%filter(Month == "Oct" & event_type=="Battles") %>% count()` in October.
+```{r message=F, warning=F}
+#fatalities by month across conflicts 
+conflicts %>%
+  mutate(Month = case_when(str_detect(event_date, "Jan") ~ "Jan",
+                           str_detect(event_date, "Feb") ~ "Feb",
+                           str_detect(event_date, "Mar") ~ "Mar",
+                           str_detect(event_date, "Apr") ~ "Apr",
+                           str_detect(event_date, "May") ~ "May",
+                           str_detect(event_date, "Jun") ~ "Jun",
+                           str_detect(event_date, "Jul") ~ "Jul",
+                           str_detect(event_date, "Aug") ~ "Aug",
+                           str_detect(event_date, "Sep") ~ "Sep",
+                           str_detect(event_date, "Oct") ~ "Oct",
+                           str_detect(event_date, "Nov") ~ "Nov",
+                           str_detect(event_date, "Dec") ~ "Dec")) %>%
+  mutate(Month = factor(Month, levels = c("Jan",
+                                          "Feb",
+                                          "Mar",
+                                          "Apr",
+                                          "May",
+                                          "Jun",
+                                          "Jul",
+                                          "Aug",
+                                          "Sep",
+                                          "Oct",
+                                          "Nov",
+                                          "Dec"))) %>%
+  group_by(Month, event_type) %>%
+  ggplot(aes(x = Month, y = fatalities, fill = event_type)) + 
+  geom_histogram(stat = "identity") +
+  labs(x = "Month", 
+       y = "Number of fatalities", 
+       title = "Fatalities by Month", 
+       fill = "Conflict type", 
+       caption = "Figure 4")
+```
+
+
+```{r message=F, warning=F}
+sector.indicators <- sector.indicators %>%
+  rename(Township = Township_Name) #rename Township for uniformity
+joined.mimu <- joined.mimu %>%
+  rename(Township = MIMU_township) #rename Township for uniformity
+
+#township college grad
+township.literacy <- sector.indicators %>%
+  filter(`Sub_Sector` == "Highest Level of Completion" & `Indicator_Type` == "University/ College - Total") %>%
+  group_by(Township) %>%
+  summarize(`No. of College Grads` = `2014`)
+
+#Township College completion count vs detainees
+township.literacy.ext <- inner_join(township.literacy, joined.mimu) %>%
+  group_by(Township) %>%
+  summarise(Detainees = detainees, `No. of College Grads`) %>%
+  arrange(desc(Detainees))
+```
+# Analysis & Results
+
+To test for correlation and significance in drivers of detainment, the statistical analysis included a chi-square test of independence and a linear regression analysis.
+
+## Chi-square test
+To test for significant association between the victim types (e.g. Government worker, student, civilian) and their current condition (i.e. detained, imprisoned or killed), we ran a Chi-square test of independence on the contingency table below. The table shows the observed number of detainees in each subgroup.
+```{r message=F, warning=F}
+victims.chisq <- coup.victims %>% #what victim type is likely to detained, imprisoned or killed
+  mutate(Status = case_when(Occupation == "Government" ~ "Government worker",
+                            Occupation == "Student" ~ "Student",
+                            TRUE ~ "Civilian")) %>%
+  with(table(Status, Event))
+```
+
+The null and alternative hypotheses are:
+
+**Null:** the variables are independent, there is no relationship between the victim type and the victim's condition. Knowing the value of one variable does not help to predict the value of the other variable
+
+**Alternative:** the variables are dependent, there is a relationship between the victim type and the victim's condition. Knowing the value of one variable helps to predict the value of the other variable
+```{r message=F, warning=F}
+victims.chisq %>% #cross tabulation of victim type and condition
+  kable(caption = "Victim type vs Current condition")
+
+victims.csq.test <- chisq.test(victims.chisq) #Chi-square test 
+victims.csq.test
+```
+
+From the chi-square test, the p-value of `r victims.csq.test$p.value` is less than the significance level of 0.05. Thus, we can reject the null hypothesis. This means that there is a significant relationship between the victim type and the victim's condition.
+
+## Regression
+
+To assess whether detainment is driven by social and economic factors, two linear regression models were run at the township level on detainees over four socio-economic indicators: wealth index measuring standard of living, household internet access, adult literacy rate and population 25 years and over with college level of education.
+
+Before running the model, we suspect that higher education level (Population 25 yr and over who received college degree by township), better living standards (Wealth index by township), and easier access to information (Number of households with internet access by township) would lead to a higher chance of being detained during the conflicts in Myanmar.
+
+The first linear model fit is a regression of the number of detainees per township against the above four socio-economic indicators at the township level. 
+
+```{r message=F, warning=F}
+#Regressions 
+
+#Wealth index indicator by township
+wealth.index <- sector.indicators %>%
+  filter(Sub_Sector == "Development" &
+         Indicator_Name == "Wealth Ranking Index") %>%
+  select(Township, `2015`) %>%
+  rename("wealth_index" = `2015`)
+
+#College level education indicator by township
+college.level <- sector.indicators %>%
+  filter(Sub_Sector == "Highest Level of Completion" &
+         Indicator_Type == "University/ College - Total") %>%
+  select(Township, `2014`) %>%
+  rename("college_level" = `2014`)
+
+#Adult literacy indicator by township
+adult.literacy <- sector.indicators %>%
+  filter(Indicator_Name == "Adult literacy rate" &
+         Indicator_Type == "Total") %>%
+  select(Township, `2014`) %>%
+  rename("literacy_rate" = `2014`)
+
+#Internet access indicator by township
+internet.access <- sector.indicators %>%
+  filter(Sub_Sector == "Internet" &
+         Indicator_Type == "Total") %>%
+  select(Township, `2014`) %>%
+  rename("internet_access" = `2014`)
+
+#join indicators to MIMU township levels
+township.indicators <- joined.mimu %>%
+  inner_join(internet.access, by = c("Township" = "Township")) %>%
+  inner_join(wealth.index, by = c("Township" = "Township")) %>%
+  inner_join(college.level, by = c("Township" = "Township")) %>%
+  inner_join(adult.literacy, by = c("Township" = "Township"))
+
+#Linear model 1: linear model regressing detainees on internet access, wealth index, college level education, and adult literacy rate
+township.lm <- lm(detainees ~ internet_access + wealth_index + college_level + literacy_rate, data = township.indicators)
+summary(township.lm)
+
+township.lm.coef <- summary(township.lm)$coef
+
+```
+
+Looking at the p-values, it looks like `college_level` (Population 25 yr and over who received college degree by township) (coefficient: `r round(township.lm.coef[4,1], 4)` , p-value: `r township.lm.coef[4,4]`) is the only  statistically significant predictor of detainment at the township level. The coefficient is positive, so detainment at the township level is positively associated with college level education in the population.
+
+To diagnose collinearity among the indicators, the matrix plot below was used to visualize the correlation between pairs of the coefficients used in the linear model above. The contingency table shows the correlation between each pair of the coefficients.
+```{r message=F, warning=F}
+#check for collinearity
+lm.var <- c("internet_access", "wealth_index", "college_level", "literacy_rate")
+
+#scatter plots of all indicators
+township.indicators %>% select(all_of(lm.var)) %>% pairs()
+```
+
+```{r message=F, warning=F}
+#correlation table of all indicators
+round(cor(township.indicators[, lm.var]), 2) %>%
+  kable(caption = "Contingency table of regression indicators")
+```
+The plot and contingency table show correlation between some coefficients. In particular, it shows that college level of education completion and households with internet access are highly correlated. This is reasonable since people who have a college degree probably live in a wealthier household where internet access is guaranteed.
+
+In the second model, the `college_level` variable was dropped and we fit a regression using the other three variables.
+```{r message=F, warning=F}
+#Linear model 2: linear model regressing detainees on internet access, wealth index, and adult literacy rate
+township.lm2 <- lm(detainees ~ internet_access + wealth_index + literacy_rate, data = township.indicators)
+summary(township.lm2)
+
+township.lm2.coef <- summary(township.lm2)$coef
+```
+
+With `college_level` dropped, the second linear model shows that `internet_access` is the only coefficient that is statistically significant (coefficient: `r round(township.lm2.coef[2,1], 4)` , p-value: `r township.lm2.coef[2,4]`) at the alpha level of 0.05. Thus, amongst the three indicators in the model `internet_access` is the only statistically significant predictor of detainment at the township level. The number of internet access in the township has a high positive correlation with the number of detainees during the conflicts in that township.
+
+Indeed, a significant correlation between two variables means that changes in one variable are associated (positively or negatively) with changes in the other variable. Nonetheless, we acknowledge that a significant correlation does not indicate that variations in one variable cause the variations in the other variable.
+
+Below is a comparison of the regression models (with and without collinearity):
+```{r message=F, warning=F}
+#comparison between model 1 and model 2
+list(first.model = township.lm,
+     second.model = township.lm2) %>%
+  modelsummary(statistic = NULL, stars = T)
+```
+
+The comparison shows that the coefficient of `adult_literacy` went from being negatively correlated to positively to positively correlated.
+
+```{r message=F, warning=F}
+plot(township.lm) #diagnostics test for linear model 1
+plot(township.lm2) #diagnostics test for linear model 2
+```
+
+**Residuals vs. Fitted**
+The plot for model 1 shows some linearity while the plot for model 2 shows non-linearity. Furthermore, we see that the variance appears to be increasing in fitted value.
+
+**Normal QQ plot**
+The residuals appear highly non-normal for both models. Both the lower tail and upper tail are heavier than we would expect under normality. This may be due to the non-constant variance issue we observed in the Residuals vs. Fitted plot.
+
+**Scale-location plot**
+We see a slight trend in residual variance that runs through the right side of the plot in both models.
+
+**Residuals vs Leverage** 
+The outliers observed are not significant.
+
+# Limitations
+
+The main limitation that could have potentially affected the results was the different spelling for townships in the detainees, imprisoned, and fallen data sets. This made it very difficult to group the people by township. As a result, our group introduced a table with the township name as it appears on the MIMU data set and combined it with the original townships using a function that determined the similarities between spelling and used the most similar. However, many townships on the original data sets were categorized as “Other.” This caused the sample size to be reduced almost by two-thirds. In addition, data sets of detainees, imprisoned, and fallen have no information on relevant variables that describe the demographics and arrest information of the victims. This created a limitation to accurately describe the demographics of detainees, imprisoned, and fallen. For instance, only 128 and 151 detainees had gender and age registered, respectively. Only 336 detainees had an arrest date related to their detainment. The imprisoned data set has 306 observations with gender and 39 with age. In the fallen data sets, 1169 and 904 observations have a gender and age, respectively, registered. The missingness found further reduced the number of observations used to find the demographics and related indicators of detainees, imprisoned, and fallen victims. 
+Given that the data sets provide little information regarding the demographics of the detainees, imprisoned, and fallen victims, the socio-economic indicators were used to find relationships between the numbers of victims and townships. However, the indicators provide an average of the population by township. This means that data does not accurately represent the part of the population that was involved in the protest. It should also be noted that the data of most recent indicators are from 2014 or 2015. There’s a chance that current indicators may have changed, possibly affecting the significance of the relationship between the indicators and detainees. 
+
+# Conclusion
+
+In Myanmar, mass protests have been seen almost daily since the February 1st coup and the protests and riots have eventually evolved into battles and violence due to the coercion. Through two regression models, it was discovered that the level of access to the internet has a positive correlation with the number of people who got detained in each township. The actions of the military such as internet blackouts have proven to justify this correlation. As with areas affected by conflict due to heavy military action, internet restrictions are imposed on the population to prevent the spread of details of the situation via the internet. Thus, we conclude that one indicator of detainment in Myanmar is access to information and ability to spread information via the internet.
+Despite the sanctions imposed by both the US and EU that intentionally hit the junta, there are limited options over how to deal with the Myanmar situation as well as helping the civilians there. 
+Hopefully, non-governmental organizations and other relevant international organizations can provide hope for the affected population via online or local sources. In the meanwhile, the future of Myanmar is still uncertain so the data should be monitored to provide more feasible solutions.
+
+# Appendix
+
+```{r message=F, warning=F}
+#conflicts across townships
+conflicts %>%
+  datasummary(data = ., (`Township` = admin3) ~ (`Conflict Type` = event_type),
+              fmt = function(.) signif(., 2),
+              title ="Conflicts across Townships", sparse_header = F)
+
+```

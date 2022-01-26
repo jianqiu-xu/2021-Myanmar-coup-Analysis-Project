@@ -1,0 +1,312 @@
+---
+title: "Programming R for Analytics: Final project"
+author: "Jeremy C. Weiss"
+date: ''
+output:
+  html_document:
+    toc: true
+    code_folding: show
+---
+
+```{r echo=FALSE, align="right", out.width="50%"}
+knitr::include_graphics("https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/Protest_in_Myanmar_against_Military_Coup_14-Feb-2021_08.jpg")
+```
+
+*CC SA: Wikimedia commons*
+
+### The Myanmar coup of 2021
+On February 1st, 2021, the Burmese military staged a coup, toppling the quasi-democratic government and removing Aung San Suu Kyi, the civilian leader supported by the National League of Democracy (NLD), and other elected officials from power.  A brief summary of events can be found [here](https://www.nytimes.com/article/myanmar-news-protests-coup.html). A [viral tweet](https://twitter.com/AdityaRajKaul/status/1356315137976672259) also documents the moment.  A newspaper source that describes the contemporary nature of this conflict is [The Irrawaddy](https://www.irrawaddy.com/).
+
+Since the coup, many civilians and opposition forces have been detained, imprisoned, and killed.  The Assistance Association for Political Prisoners (AAPP) keeps a list of these occurrences, while also noting that their catchment underrepresents the true numbers.
+
+**Your goal for the final project is to characterize detainment since the coup.  We are interested in describing who, where, and when detainment occurred, how detainment relates to imprisonment and death (via the `imprisoned` and `fallen` data sets), and what drives detainment in Myanmar from a geographic, social, and economic perspective (`MIMU` and `conflicts` data sets).**
+
+This task description is purposefully open-ended.  It is recommended that you explore the data to get a sense of the what the data may show about detainment in Myanmar, and about what possible indicators could be used to address the questions in the paragraph above.  However, you should also not explore every indicator.  Before *statistically analyzing* the data, you should generate hypotheses about detainment relationships (e.g. the drivers of detainment, subgroup differences, etc.) that you test using methods from the class.
+
+Through this exercise, you will align the task description with the skills you have developed over the course of the mini to conduct analyses of real (and evolving) data with policy implications.  You will also encounter some difficulties of working with real world data, some of which we will see below.  Note: these difficulties should not preclude you from conducting the analysis; rather you should conduct it, acknowledging explicitly those limitations so your readers can assess how they may affect your findings and inferences.
+
+### Data details
+The data you will use is in the final project folder. There you will see several files:
+
+- `detained.csv.gz`: the gzipped csv file concerning detainees (AAPP)
+- `imprisoned.csv.gz`: the file concerning those sentenced (AAPP)
+- `fallen.csv`: the file concerning those deceased civilians from conflict with the military (AAPP)
+- `MIMU_Baseline... .xlsm`: an Excel macro file containing historical Myanmar indicators at the township level (MIMU)
+- `conflicts.csv.gz`: a derived dataset on conflicts and protests in Myanmar in 2021 (ACLED)
+
+#### Variables present in the base data set
+
+To learn more about the data, you can have a look at the codebook files.  There is one for [MIMU](https://themimu.info/sites/themimu.info/files/documents/MIMU_BaselineData_IndicatorList_18Mar2021.pdf) and [ACLED](https://acleddata.com/download/2827/). There isn't one for the AAPP data, but you can learn about their data [here](https://aappb.org/?page_id=5830).  The data we are using is from a data pull on November 23, 2021.
+
+#### Level of analysis
+The AAPP data is at the individual level, while the other datasets are at the township level (somewhat larger than zip codes in the United States).
+
+Some analyses may be at the individual level, e.g. based on gender and age distributions, whereas others can be done at the township level (sometimes called "township", sometimes called "admin3").
+
+#### Self-care
+This project focuses on a potentially sensitive topic, and some of the materials may evoke strong responses.  Please let us know if you have any concerns.  
+
+#### Acknowledgments
+Credit and thanks to Megan Ryan, University of Michigan PhD student, who helped identify data sources most relevant to this timely topic.
+
+### Evaluation
+The evaluation of the final report can be broken down into respective components: (1) pre-processing, (2) technical components, (3) report professionalism, and (4) report contents.
+
+#### Pre-processing: joins, fuzzy joining, and naming (3)
+There will be three main components of the final project, and each has a small pre-processing component.
+
+1. Cleaning the `detained` data, for analysis of demographic, geographic, and longitudinal characteristics (individual and/or township level)
+2. Merging (and cleaning) the `detained`, `imprisoned`, and `fallen` data, for potential comparative analysis of detainment and violence against civilians (township level) 
+3. Merging indicators from the `MIMU` and `conflicts` datasets to access potential covariates for regression analysis (township level).
+
+Ensure you show a `head` and/or summarization of these tables to demonstrate that your pre-processing resulted in data frames appropriate for subsequent analysis.  Reference these tables as the result when describing your pre-processing procedures. 
+
+#### Technical components (18)
+We will be evaluating the reports for appropriate use, interpretation, and presentation of the following technical components: 
+
+- Post-processed data summarizations, including count, relevant summarizations, and missingness (2)
+- Tables; univariate (2)
+- Table; bivariate or multivariate (2)
+- Descriptive figures; univariate (2)
+- Descriptive figures; bivariate  (2)
+- Descriptive figures; trivariate (2)
+- Statistical tests; one of t-test, Wilcox test, Fisher's exact test, and chi-square test (2)
+- Regressions (at least two models) (2)
+- Regression diagnostics and assessment for collinearity (2)
+
+Correct "use" means that the display of the component is informative, serves your analysis meaningfully, and draws upon the appropriate data.  Correct "interpretation" means that the findings the readers should glean from figure are stated in text, and that those findings are present in the figure.  Interpretation statements better serve the argument when they reference the figure parenthetically, e.g. `"The correlation ... is positive and significant (p=..., 95% CI [...,...]) (Figure A), suggesting that...`, rather than `"Figure A shows the correlation ... is positive and significant (p=..., 95% CI [...,...]), which suggests ...`. Interpretation statements should be written in "inline code" form wherever possible.  Correct "presentation" includes appropriate choice of display (display type, readable, consideration for subgrouping and white space), appropriate titles/axes/legends (*not* default column names), and appropriate rounding.  There should be little to no R code displayed (folded code blocks are acceptable).
+
+**Each of these components must analyze separate relationships.** For example, it is not sufficient to show the same relationship between variables x and y for the bivariate table and the bivariate figure.  To assist with this, you will fill out a table (spreadsheet, see next paragraph) that documents the components and the columns used (as aesthetics, etc.).  You may include additional figures that support your narrative---these represent minimum requirements.
+
+**We will use a spreadsheet to document your choice of technical components**.  Download/copy the spreadsheet [here](https://docs.google.com/spreadsheets/d/1eIBYH_CMsVk6XCysJOUhdJrKEKdPZlWCQAbsf_AxLIY/edit?usp=sharing), fill it out, and submit it as part of the deliverables. Note: the parameters for **several technical components are fixed** (see the spreadsheet), and several are suggested (to help you get started, but you may override with alternative that strengthen your narrative), and several are left for your exploration.
+
+**Each of these components should speak to the narrative** of your report. It should be clearly evident why the component you present relates to the story you are telling about post-coup detainment.
+
+
+#### Readability (9)
+The readability component is an assessment of the deliverables as a whole.  For the report (3), is it written clearly (is the argument easy to follow, and logical); is the analysis complete (is the analysis setup well justified; are threats to inference considered; are limitations of the analyses documented); concision (is the narrative direct; do the figures reflect the narrative; is the document organized such that details are provided and at the same time do not overshadow the analysis.
+
+For Rmd readability, we assess for the use of:
+
+- inline code chunks (2)
+- good commenting (2)
+- code readability (naming and style consistency) (2)
+
+#### Report narrative (10)
+The report component is an assessment of the narrative you provide, broken down by section.  The sections you should include (at minimum) are: abstract, introduction, methods, results, and discussion.
+Within the discussion, ensure you include one or more paragraphs on inferences from your results, limitations of your analysis, contextualization to policy and potential stakeholders, and to conclusions and future directions.
+
+There is no "page limit" for this report---on length, I expect to read at least several paragraphs for each of the above components (except for the abstract, conclusions, and future directions, which may each be a single paragraph).
+
+### Groups
+You may self-organize into final project groups of up to size 3 (working alone is acceptable).  To document your group choice, please put yourself into groups on the Canvas course page: People --> Final Project Groups by end of day Wednesday, December 1.  
+
+
+### What to submit
+The final project Rmd, report (html preferred, pdf acceptable), and spreadsheet (as .xlsx) are the main deliverables for the final project. These will be submit on Canvas (one per group).  **Ensure your group name and andrew ids are in the document header.**  In addition, Lab 12 (the starter script) will be counted towards your participation grade.
+
+The deliverables are **due end of day Thursday, December 9th** on Canvas.
+
+### Starter script materials and joins
+
+#### Package loading
+
+```{r message=F, warning=F}
+library(tidyverse)
+library(knitr)
+library(modelsummary)
+```
+
+
+#### Importing the data sets
+
+Here's code to import the data sets, which are located in the folder `https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021`.  There will be a few misparses due to pdf scraping and free-text entries for which we can document and carry on.
+
+```{r}
+# Import starting data (AAPP)
+detainees = read_csv("https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/detained.csv.gz")
+imprisoned = read_csv("https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/imprisoned.csv.gz")
+fallen = read_csv("https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/fallen.csv")
+
+detainees
+
+```
+
+Next we load indicators that you may want for your township-level analyses.
+
+```{r}
+# Indicators data
+# 1. conflicts (ACLED)
+conflicts = read_csv("https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/conflicts.csv.gz")
+conflicts
+```
+
+The MIMU data is in an excel spreadsheet macro file, which you can browse yourself.  Below is code to convert into a nested data frame per indicator.
+```{r}
+# 2. sectors (MIMU)
+## readxl doesn't read from urls, so this is a workaround:
+tmp <- tempfile(fileext = ".xlsm")
+httr::GET(
+  url = "https://www.andrew.cmu.edu/user/jweiss2/21f_r/94842/final_2021/MIMU_BaselineData_AllSectors_Countrywide_18Mar2021_revised.xlsm", 
+  httr::write_disk(tmp)
+)
+sector.indicators = 
+  readxl::read_xlsx(tmp, sheet=3, skip = 5) %>% as_tibble()
+
+
+### Organize all sectors data to be given by nested tibbles per indicator
+sector.nest = sector.indicators %>% 
+  select(1:3, 
+         Indicator_Name, Indicator_Type, Sector, Unit, 
+         starts_with("20"), Source_Name) %>%
+  mutate(Indicator = paste(Indicator_Name, Indicator_Type, 
+                           Sector, Unit, Source_Name, sep="|")) %>%
+  select(1:3, Indicator, starts_with("20")) %>%
+  pivot_longer(cols = starts_with("20"), 
+               names_to = "Year", 
+               values_to="Value") %>%
+  filter(!is.na(Value)) %>%
+  nest(data = -Indicator) %>%
+  separate(Indicator, sep="\\|", 
+           into = c("Indicator_Name", "Indicator_Type",
+                    "Sector","Unit","Source_Name")) 
+sector.nest
+
+```
+As you can see, there are many indicators at the township level---check out the MIMU [codebook](https://themimu.info/sites/themimu.info/files/documents/MIMU_BaselineData_IndicatorList_18Mar2021.pdf) above to explore what's available.
+
+#### Merging on township names
+While the MIMU and ACLED data have well aligned township names, the AAPP data townships are based on free text inputs.  Some of the files has a column for township, while others simply have an address (with a township embedded).  To be able to merge the data at the township level, we will take an approximate matching approach.  
+
+**Step 1: Find best township matches**
+
+We can look at the number of edits---insertions, deletions, or substitutions---between two strings (township names), which is called the Levenshtein distance. Good matches will have few edits.  For example, the Levenshtein distance between "Mary" and "Merry" is 2: one substitution, and one insertion.
+
+Here's a function `leven` to help you with finding approximate matches. It takes a string `x` and a string vector `y` and produces a data frame with matches in `y` to elements of `x`.  For `x`, it returns all matches in `y` that are within `k` edits of the best matching `y`, and attaches a column containing edit distance. The function `apply_leven` does this for string vectors `x` and `y` but keeps only the best match (if the best match is good enough).
+
+```{r}
+# We can use the Levenshtein distance to find approximate matches at the township level.
+
+#' level computes the levenshtein distance between x and each y and returns
+#' the ones that are within k of the smallest value as an ordered vector. 
+#' See ?adist for details.
+#' @return data.frame of hits
+leven = function(x, y, k=0, ignore.case=F) {
+  data.frame(y=y) %>%
+    as_tibble() %>%
+    mutate(distance = utils::adist(x, y, 
+                                   ignore.case=ignore.case) %>% .[1,]) %>%
+    filter(distance <= min(distance, na.rm=T) + k) %>%
+    mutate(distance.per.char = distance/nchar(y))
+}
+
+# Use `leven` for string *vectors* `x` and `y`
+apply_leven = function(x, y, k=0, distance.threshold=0.3, ignore.case=F) {
+  data.frame(x=x) %>%
+  mutate(leven.df = map(x, ~ leven(.x, y=y,
+                                   k=k, ignore.case=ignore.case))
+  ) %>%
+  unnest(everything()) %>%
+  mutate(is.match=distance.per.char < distance.threshold) %>%
+  arrange(distance.per.char) %>%  # order by best match
+  group_by(x) %>% 
+  slice(1) %>%  # keep the best match per `x`
+  ungroup() %>%
+  mutate(y = ifelse(is.match, y, "Other"))  # convert non-matches to Other
+}
+
+```
+
+How should you consider using `leven`? We want matches with low `distance.per.char`, and below some threshold, we will assume they are correct.  For those who exceed the threshold, we fail to match them, and they could be kept in an "Other" category of township.
+
+An example with toy townships:
+```{r}
+x = c("Pitsburg", "NewYorkCity", "San Francisco")
+y = c("Pittsburgh", "New York City", "York City")
+distance.threshold = 0.3
+
+# Use `leven` on x
+data.frame(x=x) %>%
+  mutate(leven.df = map(x, ~ leven(.x, y=y, k=2))) %>%
+  unnest(everything()) %>%
+  mutate(is.match=distance.per.char < distance.threshold)
+```
+
+We can use `apply_leven` directly
+```{r}
+# Then, because we may want to pick the best one per x,
+# we might simply use apply_leven instead:
+apply_leven(x=x, y=y, k=2, distance.threshold=0.3)
+
+# Using this routine, we can assign township names from `y` to `x` and
+# group the other in "Other"
+```
+
+**Step 2: link data**
+Now that we have a linking table between `x` and `y`, we can merge datasets at the township level, so that we can use columns from both datasets for analysis.
+
+To do this, consider a "left" and "right" dataset, and further that each has *one row per township*.  Note that the "left" and "right" datasets may be partially overlapping in townships.
+
+Then, we can use one of the following commands:  
+
+- `left_join` (keep all townships in "left"), 
+- `inner_join` (keep the intersection of townships),  
+- `right_join` (keep all townships in "right"), and,
+- `full_join` (keep the union of townships),
+
+to merge the datasets.  You can read more on joins from our reference [here](https://r4ds.had.co.nz/relational-data.html#outer-join)
+
+An example:
+```{r}
+# left.df has city population in millions
+left.df = data.frame(x=x) %>%
+  mutate(population = c(2,20,7))
+left.df
+```
+
+```{r}
+# right.df has the geographic region attached
+right.df = data.frame(y=y, region=c("East","East","England"))  
+right.df
+```
+
+```{r}
+apply_leven(x,y)
+```
+
+```{r}
+# `left_join` example:
+left.df %>%
+  inner_join(apply_leven(x,y), by="x") %>%  # attaches the merging matrix to "x"
+  select(x, y, population) %>%
+  left_join(right.df, by="y")  # attaches `right.df` based on "y"
+
+# `full_join` example
+left.df %>%
+  inner_join(apply_leven(x,y), by="x") %>%  # attaches the merging matrix to "x"
+  select(x, y, population) %>%
+  full_join(right.df, by=c("y"="y"))  # attaches `right.df` based on "y"
+
+# The left result has population and region in the same dataset for all successful matches.
+# The full result keep all township but with NAs where there failed to be a match.
+
+# Note the `by=c("y"="y")`, which indicates you want to join on columns "y" (of the left) and "y" (of the right).
+```
+
+To summarize, if you want to add columns to your "left" table but not expand the number of rows, you should:
+
+- ensure your "right" table has unique merge (by=...) column values 
+- use `left_join` to keep all entries from the left table
+
+#### Addendum: address to township
+For the final project, feel free to use the following code to extract (roughly) township from address.
+```{r, eval=F}
+# The code below assumes <your-tibble> has a column called Address you want to extract township from
+<your-tibble> %>%
+  mutate(township = str_replace_all(Address,".*,","")) %>%
+  mutate(township = str_replace_all(township,"T?own.*","")) %>% 
+  count(township)
+```
+
+#### Indicators to include in regression
+You are free to choose whichever indicators you think may explain the variation in detainment---but a word of caution, trying to include them all in regression will lead to the challenge that different indicators are measured for different sets of townships.  In other words, attempting to include many indicators will likely result in substantial missingness, which we have not addressed in this course (and summarily cannot be addressed effectively without making strong and potentially inappropriate assumptions).  My advice is to explore the data by understanding what indicators are available to you and considering how they could be related to detainment, then state the hypotheses, then test it statistically and run diagnostics.
