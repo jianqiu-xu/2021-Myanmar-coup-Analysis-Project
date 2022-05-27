@@ -1,1 +1,6 @@
 # 2021-Myanmar-coup-Analysis-Project
+
+## The Myanmar coup of 2021
+On February 1st, 2021, the Burmese military staged a coup, assuming control of the country and removing Aung San Suu Kyi, the civilian leader supported by the National League of Democracy (NLD), and other elected officials from power. Since the coup, many civilians and opposition forces have been detained, imprisoned, and killed. Detention as punishment for the legitimate exercise of fundamental human rights, including freedom of expression and opinion, freedom of peaceful assembly, and freedom of association, is arbitrary and problematic.
+
+The goal of this report is to characterize the post-coup detainment between February and November 2021. The report analysis presents information on the demographics of victims, their locations and possible drivers of detainment. This will be conducted by exploring the relationship between detainment in Myanmar townships and geographic, social, and economic indicators across townships. Consequently, the hypothesis set up to facilitate significance testing is checking for significant relationship between detainment at the township level and townships with high number of college educated individuals, access to the internet and high living standards.
